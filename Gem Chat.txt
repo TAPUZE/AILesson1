@@ -1,0 +1,246 @@
+אני אדריך אותך כיצד ליצור backend פשוט באמצעות Node.js ו-Express. זהו פתרון נפוץ וקל יחסית להתחלה. לאחר מכן, אסביר כיצד לשנות את קוד ה-JavaScript בקובץ ה-HTML שלך כדי שיפנה ל-backend הזה.
+
+חשוב מאוד: את קוד ה-backend הזה תוכל/י להעלות למאגר GitHub פרטי, או למאגר ציבורי בתנאי שמפתח ה-API עצמו לא ייכנס לקוד אלא יישמר כמשתנה סביבה (environment variable) בפלטפורמת האחסון שתבחר/י עבור ה-backend.
+
+ארכיטקטורה כללית:
+Frontend (קובץ ה-HTML שלך על GitHub Pages): ישלח בקשה ל-backend שלך עם ההנחיה (prompt) ל-Gemini.
+Backend (שרת Node.js שתקים/י במקום אחר): יקבל את הבקשה, יוסיף את מפתח ה-API של Gemini (ששמור בו בצורה מאובטחת), יבצע את הקריאה האמיתית ל-Gemini API, ויחזיר את התשובה של Gemini חזרה ל-Frontend.
+יצירת ה-Backend (Node.js עם Express)
+תצטרך/י סביבת Node.js מותקנת במחשב שלך כדי לפתח ולבדוק את זה מקומית.
+
+1. יצירת תיקיית פרויקט חדשה ל-backend:
+לדוגמה, gemini-backend.
+
+2. אתחול הפרויקט וקביעת תלויות:
+פתח/י טרמינל (שורת פקודה) בתיקייה זו והרץ/י:
+
+Bash
+
+npm init -y
+npm install express axios dotenv cors
+express: פריימוורק פופולרי ל-Node.js לבניית שרתים.
+axios: ספרייה לביצוע בקשות HTTP (כדי לקרוא ל-Gemini API מהשרת שלך).
+dotenv: לניהול משתני סביבה (כמו מפתח ה-API) מקובץ .env בזמן פיתוח מקומי.
+cors: לטיפול ב-Cross-Origin Resource Sharing (הכרחי כשה-frontend וה-backend בדומיינים שונים).
+3. יצירת קובץ .env (לפיתוח מקומי בלבד - לא להעלות ל-GitHub!):
+בתיקיית הפרויקט, צור/י קובץ בשם .env והוסף/י בו את מפתח ה-API שלך:
+
+GEMINI_API_KEY=הכנס_כאן_את_מפתח_ה_API_שלך_מ_GOOGLE_AI_STUDIO
+PORT=3000
+4. יצירת קובץ .gitignore:
+צור/י קובץ בשם .gitignore והוסף/י בו את השורה הבאה כדי שהקובץ .env (המכיל את המפתח) לא יעלה בטעות ל-GitHub:
+
+.env
+node_modules/
+5. יצירת הקובץ הראשי של השרת (לדוגמה, server.js):
+
+JavaScript
+
+// server.js
+require('dotenv').config(); // טוען משתני סביבה מהקובץ .env
+const express = require('express');
+const axios = require('axios');
+const cors = require('cors');
+
+const app = express();
+const port = process.env.PORT || 3001; // השתמש ב-PORT ממשתני הסביבה או ב-3001 כברירת מחדל
+
+app.use(cors()); // מאפשר בקשות CORS מכל המקורות (ניתן להגביל יותר בסביבת פרודקשן)
+app.use(express.json()); // מאפשר לשרת לקבל JSON בגוף הבקשה
+
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+
+app.post('/api/gemini', async (req, res) => {
+    const userPrompt = req.body.prompt;
+
+    if (!userPrompt) {
+        return res.status(400).json({ error: 'No prompt provided' });
+    }
+
+    if (!GEMINI_API_KEY) {
+        console.error('Gemini API key is not set.');
+        return res.status(500).json({ error: 'Server configuration error: API key missing.' });
+    }
+    
+    const payload = {
+        contents: [{
+            role: "user",
+            parts: [{ text: userPrompt }]
+        }]
+        // ניתן להוסיף כאן הגדרות נוספות כמו generationConfig אם צריך
+    };
+
+    try {
+        const geminiResponse = await axios.post(GEMINI_API_URL, payload, {
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        // החזרת התשובה המלאה מ-Gemini, או רק את הטקסט הרלוונטי
+        // res.json(geminiResponse.data); 
+        
+        // החזרת הטקסט בלבד, אם זה מה שה-frontend מצפה לו
+         if (geminiResponse.data.candidates && geminiResponse.data.candidates.length > 0 &&
+             geminiResponse.data.candidates[0].content && geminiResponse.data.candidates[0].content.parts &&
+             geminiResponse.data.candidates[0].content.parts.length > 0) {
+             const generatedText = geminiResponse.data.candidates[0].content.parts[0].text;
+             res.json({ generatedText: generatedText });
+         } else {
+             // אם התשובה במבנה לא צפוי או ריקה
+             console.warn('Unexpected response structure from Gemini API:', geminiResponse.data);
+             res.json({ generatedText: "לא התקבלה תשובה טקסטואלית ברורה מה-AI." });
+         }
+
+    } catch (error) {
+        console.error('Error calling Gemini API:', error.response ? error.response.data : error.message);
+        res.status(error.response ? error.response.status : 500).json({ 
+            error: 'Failed to get response from Gemini API', 
+            details: error.response ? error.response.data : error.message 
+        });
+    }
+});
+
+app.listen(port, () => {
+    console.log(`Backend server listening at http://localhost:${port}`);
+});
+6. הרצת ה-backend מקומית (לבדיקה):
+בטרמינל, הרץ/י:
+
+Bash
+
+node server.js
+השרת אמור להתחיל להאזין בכתובת http://localhost:3000 (או הפורט שבחרת).
+
+שינויים בקוד ה-Frontend (בקובץ ה-HTML שלך)
+כעת, צריך לשנות את הפונקציה callGeminiAPI בקובץ ה-HTML שלך כך שתפנה ל-backend שיצרת, במקום ישירות ל-Google.
+
+בתוך תג ה-<script> בקובץ ה-HTML שלך, שונה את הפונקציה callGeminiAPI:
+
+JavaScript
+
+    // ... (שאר הקוד של userProjectData, exampleOutputs, ופונקציות אחרות נשאר כפי שהוא)
+
+    async function callGeminiAPI(prompt, outputElementOrTextareaId, buttonElement) {
+        const outputEl = document.getElementById(outputElementOrTextareaId);
+        if (!outputEl) return;
+
+        const originalButtonText = buttonElement.dataset.originalText || buttonElement.innerHTML;
+        if (!buttonElement.dataset.originalText) {
+             buttonElement.dataset.originalText = originalButtonText;
+        }
+        buttonElement.innerHTML = `מעבד... <div class="loading-spinner"></div>`;
+        buttonElement.disabled = true;
+        
+        let displayContainer;
+        if (outputEl.tagName === 'PRE' || outputEl.classList.contains('gemini-output-box')) { 
+            displayContainer = outputEl.parentElement;
+            if(displayContainer) displayContainer.classList.remove('hidden');
+            outputEl.innerHTML = '<div class="text-center text-slate-500 p-4">טוען הצעה מ-AI...</div>';
+        } else { 
+            outputEl.value = 'טוען הצעה מ-AI...';
+        }
+
+        // !!! שינוי מרכזי כאן: הכתובת של ה-Backend שלך !!!
+        // כשתעלה את ה-backend לרשת, החלף את הכתובת המקומית בכתובת של השרת החיצוני שלך
+        const backendApiUrl = 'http://localhost:3000/api/gemini'; // לפיתוח מקומי
+        // const backendApiUrl = 'https://your-deployed-backend-url.com/api/gemini'; // לדוגמה אחרי העלאה לרשת
+
+        try {
+            const response = await fetch(backendApiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: prompt }) // שלח את ההנחיה בגוף הבקשה
+            });
+
+            if (!response.ok) {
+                const errorResult = await response.json();
+                console.error('Backend API Error:', errorResult);
+                throw new Error(`שגיאה מהשרת שלך: ${response.status} ${response.statusText}. פרטים: ${errorResult.error || errorResult.message}`);
+            }
+
+            const result = await response.json();
+            // ה-backend שלי מחזיר אובייקט עם שדה generatedText
+            let generatedText = result.generatedText || "לא התקבלה תשובה ברורה מה-AI. נסו שוב מאוחר יותר או עם הנחיה אחרת.";
+            
+            const formattedHtml = simpleMarkdownToHtml(generatedText);
+
+            if (outputEl.tagName === 'PRE' || outputEl.classList.contains('gemini-output-box')) {
+                outputEl.innerHTML = formattedHtml; 
+            } else { 
+                outputEl.value = generatedText; 
+            }
+            
+            buttonElement.innerHTML = "✨ הצעה התקבלה מ-AI";
+            // עדכון userProjectData נשאר כפי שהיה...
+            if (outputElementOrTextareaId === 'user-agenda-draft') userProjectData.agendaDraft = generatedText;
+            else if (outputElementOrTextareaId === 'user-invite-draft') userProjectData.inviteDraft = generatedText;
+            else if (outputElementOrTextareaId === 'user-mock-transcript') {
+                userProjectData.mockTranscript = generatedText;
+                const transcriptForSummaryEl = document.getElementById('user-transcript-for-summary');
+                if (transcriptForSummaryEl) transcriptForSummaryEl.value = generatedText; 
+            }
+            else if (outputElementOrTextareaId === 'user-summary-notes') {
+                userProjectData.summaryNotes = generatedText;
+                const summaryForEmailEl = document.getElementById('user-summary-for-email');
+                if (summaryForEmailEl) summaryForEmailEl.value = generatedText; 
+            }
+            else if (outputElementOrTextareaId === 'user-email-draft') userProjectData.emailDraft = generatedText;
+
+
+            setTimeout(() => {
+                buttonElement.innerHTML = originalButtonText;
+                buttonElement.disabled = false;
+            }, 3000);
+
+        } catch (error) {
+            console.error('Fetch Error:', error);
+            const errorMessage = `אירעה שגיאה: ${error.message}. אנא בדקו את חיבור האינטרנט ונסו שוב.`;
+            if (outputEl.tagName === 'PRE' || outputEl.classList.contains('gemini-output-box')) {
+                outputEl.innerHTML = `<div class="text-red-600 p-4">${errorMessage}</div>`;
+            } else {
+                outputEl.value = errorMessage;
+            }
+            buttonElement.innerHTML = "שגיאה, נסה שוב";
+            buttonElement.disabled = false;
+        }
+    }
+
+    // ... (שאר הפונקציות callGeminiForUserProject, updateProgress וכו' נשארות כפי שהן)
+    ```
+    **הערה:** הסרתי את השורה `const apiKey = "";` מהפונקציה `callGeminiAPI` ב-frontend, מכיוון שהמפתח כבר לא בשימוש שם.
+
+### העלאת ה-Backend לרשת
+
+אחרי שיצרת ובדקת את ה-backend מקומית, תצטרך/י להעלות אותו לשירות אחסון שרתים. הנה כמה אפשרויות פופולריות שמציעות תוכניות חינמיות טובות להתחלה:
+
+1.  **Vercel:** (מומלץ מאוד אם ה-frontend שלך על GitHub)
+    * מתממשק בקלות עם מאגרי GitHub.
+    * מזהה אוטומטית פרויקטים של Node.js.
+    * מאפשר הגדרת משתני סביבה (כמו `GEMINI_API_KEY`) דרך הממשק שלהם בקלות.
+2.  **Netlify:** (גם כן מומלץ מאוד)
+    * דומה ל-Vercel, מתממשק עם GitHub ומאפשר הגדרת משתני סביבה.
+    * מציע גם "Netlify Functions" שהן דרך נוספת (ולעיתים פשוטה יותר) ליצור backend קטן ללא צורך בקובץ `server.js` מלא.
+3.  **Render:**
+    * עוד פלטפורמה טובה עם תוכנית חינמית לאחסון שירותי web מבוססי Node.js.
+    * תומך במשתני סביבה.
+4.  **Heroku (בעבר היה פופולרי מאוד, כיום התוכנית החינמית מוגבלת יותר):**
+    * עדיין אפשרות, אך ייתכן שתדרוש יותר הגדרות.
+
+**תהליך העלאה כללי (לדוגמה, עם Vercel או Netlify):**
+
+1.  העלה/י את קוד ה-backend שלך (התיקייה `gemini-backend` עם `server.js`, `package.json` וכו', **אבל בלי `.env` ובלי `node_modules` כי `.gitignore` דואג לזה**) למאגר GitHub (עדיף פרטי אם את/ה עדיין לא בטוח/ה לגבי אבטחת הקוד, למרות שהמפתח עצמו לא שם).
+2.  צור/י חשבון ב-Vercel או Netlify.
+3.  קשר/י את חשבון ה-GitHub שלך לפלטפורמה.
+4.  ייבא/י את המאגר של ה-backend שלך כפרויקט חדש.
+5.  במהלך הגדרת הפרויקט בפלטפורמה, תהיה לך אפשרות להגדיר **משתני סביבה**. כאן תזין/י את `GEMINI_API_KEY` עם הערך של המפתח שלך, וגם `PORT` (למרות שפלטפורמות אלו לרוב מנהלות את הפורט בעצמן).
+6.  הפלטפורמה תבנה ותעלה את ה-backend שלך ותספק לך כתובת URL ציבורית (לדוגמה, `https://your-project-name.vercel.app`).
+7.  **חשוב:** עדכן/י את המשתנה `backendApiUrl` בקוד ה-JavaScript של ה-Frontend (קובץ ה-HTML) לכתובת הזו.
+
+### סיכום ואבטחה:
+
+* **לעולם אל תעלה/י את מפתח ה-API שלך ישירות לקוד ב-GitHub**, גם לא בקוד ה-backend אם המאגר ציבורי. השתמש/י תמיד במשתני סביבה בפלטפורמת האחסון.
+* הגדרת ה-`cors()` ב-backend כרגע מאפשרת גישה מכל מקור. בסביבת פרודקשן, כדאי להגביל אותה כך שתאפשר גישה רק מהדומיין של ה-frontend שלך (הכתובת של GitHub Pages).
+
+זהו תהליך מורכב יותר מיצירת קובץ HTML בלבד, אבל הוא הכרחי לשימוש מאובטח ב-API חיצוני כמו Gemini. אם תתקל/י בשאלות ספציפיות בשלבי ההקמה, אל תהסס/י לשאול!
+
+Sources
